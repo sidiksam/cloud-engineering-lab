@@ -1,0 +1,41 @@
+name: KloudSkool lab check
+
+# Run from the Actions tab: KloudSkool lab check > Run workflow > choose the lab.
+# The check runs on labs.kloudskool.com. GitHub proves who started this run with a
+# short-lived identity token, so there are no secrets to set up.
+on:
+  workflow_dispatch:
+    inputs:
+      lab:
+        description: "Which lab to check"
+        required: true
+        type: choice
+        options: ["12", "13", "final"]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check lab ${{ inputs.lab }}
+        env:
+          LAB: ${{ inputs.lab }}
+          GH_RUN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KS_GATEWAY: https://labs.kloudskool.com
+        run: |
+          id_token=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$KS_GATEWAY" | jq -r .value)
+          status=$(curl -sS -o result.md -w '%{http_code}' --max-time 300 -X POST "$KS_GATEWAY/v1/actions/check" \
+            -H "Authorization: Bearer $id_token" --data-urlencode "lab=$LAB" \
+            --data-urlencode "github_token=$GH_RUN_TOKEN") || status=000
+          if [ "$status" = 000 ] || [ ! -s result.md ]; then
+            printf '## KloudSkool lab check\n\n**[OFFLINE]** The lab service (labs.kloudskool.com) cannot be reached right now. Wait a few minutes, then run this check again.\n' > result.md
+          fi
+          cat result.md >> "$GITHUB_STEP_SUMMARY"
+          cat result.md
+          [ "$status" = 200 ]

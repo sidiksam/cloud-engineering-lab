@@ -1,0 +1,39 @@
+name: Review bot
+
+# Plays the senior engineer who reviews your PLAT-045 and PLAT-101 pull requests.
+# The review is written on labs.kloudskool.com and posted here as github-actions[bot].
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  review:
+    if: startsWith(github.head_ref, 'feature/PLAT-045-') || startsWith(github.head_ref, 'feature/PLAT-101-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Review the pull request
+        env:
+          GH_RUN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          KS_GATEWAY: https://labs.kloudskool.com
+        run: |
+          id_token=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$KS_GATEWAY" | jq -r .value)
+          status=$(curl -sS -o result.md -w '%{http_code}' --max-time 120 -X POST "$KS_GATEWAY/v1/actions/review" \
+            -H "Authorization: Bearer $id_token" --data-urlencode "pr_number=$PR_NUMBER" \
+            --data-urlencode "head_ref=$HEAD_REF" --data-urlencode "head_sha=$HEAD_SHA" \
+            --data-urlencode "github_token=$GH_RUN_TOKEN") || status=000
+          if [ "$status" = 000 ] || [ ! -s result.md ]; then
+            printf '## Review bot\n\n**[OFFLINE]** The lab service (labs.kloudskool.com) cannot be reached right now. Push again or edit the PR description in a few minutes to re-run the review.\n' > result.md
+          fi
+          cat result.md >> "$GITHUB_STEP_SUMMARY"
+          cat result.md
+          [ "$status" = 200 ]
